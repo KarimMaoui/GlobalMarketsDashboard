@@ -5,7 +5,6 @@ import numpy as np
 import pandas_datareader.data as web
 import pandas as pd
 
-
 st.set_page_config(layout="wide", page_title="Market dashboard")
 
 ##### DICT #####
@@ -20,7 +19,6 @@ period_dict = {
     "20 Years": "20y",
     "Max": "max"
 }
-
 
 vol_window_dict = {
     "5 Days (1w)": 5,
@@ -93,7 +91,6 @@ ASSETS = {
     }
 }
 
-
 SERIES = {
     "US_Yields": {
         "US 1M": "DGS1MO",
@@ -125,20 +122,24 @@ SERIES = {
     }
 }
 
-
 ##### FUNCTIONS #####
 
 def fetch_yfinance_data(tickers, period):
-    yfinance_data = yf.download(tickers, period=period)["Close"].ffill().dropna()
+    data = yf.download(tickers, period=period)["Close"]
+    yfinance_data = data.ffill().dropna()
     rename_map = {}
     for category, assets in ASSETS.items():
         for name_displayed, ticker in assets.items():
             rename_map[ticker] = name_displayed
+    
+    # Gérer le cas où un seul ticker est sélectionné (Series vs DataFrame)
+    if isinstance(yfinance_data, pd.Series):
+        yfinance_data = yfinance_data.to_frame()
+        
     yfinance_data = yfinance_data.rename(columns=rename_map)
     return yfinance_data
 
-
-def plot_yfinance_data (yfinance_data, tickers, logscale):
+def plot_yfinance_data(yfinance_data, tickers, logscale):
     yfinance_data_norm = yfinance_data / yfinance_data.iloc[0]
     if len(tickers) == 1:
         yfinance_fig = px.line(yfinance_data, 
@@ -151,31 +152,29 @@ def plot_yfinance_data (yfinance_data, tickers, logscale):
                                y=yfinance_data_norm.columns, 
                                log_y=logscale)
         yfinance_fig.update_yaxes(tickformat=".0%")
-        yfinance_fig.update_layout(hovermode='x')
+    
+    yfinance_fig.update_layout(hovermode='x')
     return yfinance_fig
-
 
 def metrics_yfinance_data(yfinance_data):
     columns = yfinance_data.columns  
     last_price = yfinance_data.iloc[-1]
+    # Calcul de la variation sur la période
     delta = (yfinance_data.iloc[-1] / yfinance_data.iloc[0] - 1) * 100 
+    
     for i in range(0, len(columns), 5):
         cols = st.columns(5)
         batch_cols = columns[i : i + 5]  
         for j, col_name in enumerate(batch_cols):
             with cols[j]:
+                # CORRECTION ICI : Suppression des arguments chart_data, chart_type, border
                 st.metric(
                     label=col_name,
-                    value=f"${last_price[col_name]:,.2f}",
-                    delta=f"{delta[col_name]:,.2f} %",
-                    chart_data=round(
-                        (yfinance_data[col_name] / yfinance_data[col_name].iloc[0] - 1) * 100,
-                        2),
-                    chart_type="area",
-                    border=True)
+                    value=f"{last_price[col_name]:,.2f}",
+                    delta=f"{delta[col_name]:,.2f} %"
+                )
 
-def get_ticker(equity_choice,commodity_choice,index_choice,forex_choice,
-               fixed_income_choice):
+def get_ticker(equity_choice, commodity_choice, index_choice, forex_choice, fixed_income_choice):
     tickers = ([ASSETS["Equity"][name] for name in equity_choice] +
               [ASSETS["Commodity"][name] for name in commodity_choice] +
               [ASSETS["Index"][name] for name in index_choice] +
@@ -183,28 +182,23 @@ def get_ticker(equity_choice,commodity_choice,index_choice,forex_choice,
               [ASSETS["Fixed Income"][name] for name in fixed_income_choice])
     return tickers
 
-
-def yfinance_data_correlation (yfinance_data):
+def yfinance_data_correlation(yfinance_data):
     correlation_data = yfinance_data.corr()
-    correlation_fig = px.imshow(correlation_data,text_auto=True,color_continuous_scale="RdYlGn",
-                     zmin=-1, zmax=1)
-    correlation_fig.update_xaxes(side="top",title=None)
+    correlation_fig = px.imshow(correlation_data, text_auto=True, color_continuous_scale="RdYlGn",
+                               zmin=-1, zmax=1)
+    correlation_fig.update_xaxes(side="top", title=None)
     correlation_fig.update_yaxes(title=None)
     return correlation_fig
 
-
-def plot_volatility(yfinance_data, window,logscale):
+def plot_volatility(yfinance_data, window, logscale):
     log_returns = np.log(yfinance_data / yfinance_data.shift(1))
-    volatility = round(log_returns.rolling(window=window).std() * np.sqrt(252) * 100,2)
+    volatility = round(log_returns.rolling(window=window).std() * np.sqrt(252) * 100, 2)
     volatility = volatility.dropna() 
     fig = px.line(volatility,
                   title=f"Historic Volatility ({window} Days Rolling)",
                   log_y=logscale) 
-    fig.update_layout(
-        yaxis_title="Annualized Volatility (%)", 
-        hovermode='x')
+    fig.update_layout(yaxis_title="Annualized Volatility (%)", hovermode='x')
     return fig
-
 
 def fetch_fred_data(start, SERIES):
     all_tickers = []
@@ -218,132 +212,86 @@ def fetch_fred_data(start, SERIES):
     fred_data = fred_data.rename(columns=rename_map)
     return fred_data
 
-
 def plot_us_maturities_bar(fred_data):
-    selected_columns = list(SERIES["US_Yields"].keys())
+    selected_columns = [col for col in SERIES["US_Yields"].keys() if col in fred_data.columns]
     latest_data = fred_data[selected_columns].iloc[-1]
     df_plot = latest_data.reset_index()
     df_plot.columns = ['Maturities', 'Yield (%)']
-    fig = px.bar(df_plot,
-                 x='Maturities',
-                 y='Yield (%)',
-                 text_auto='.2f',
-                 title="US Yields over maturities")
+    fig = px.bar(df_plot, x='Maturities', y='Yield (%)', text_auto='.2f', title="US Yields over maturities")
     fig.update_layout(showlegend=False)
     return fig
 
 def plot_oecd_10y_bar(fred_data):
-    selected_columns = list(SERIES["Yields_10Y_OECD"].keys())
+    selected_columns = [col for col in SERIES["Yields_10Y_OECD"].keys() if col in fred_data.columns]
     latest_data = fred_data[selected_columns].iloc[-1].sort_values(ascending=True)
     df_plot = latest_data.reset_index()
     df_plot.columns = ['Countries', 'Yield (%)']
-    fig = px.bar(df_plot,
-                 x='Countries',
-                 y='Yield (%)',
-                 text_auto='.2f',
-                 title="OECD 10Y Yields")
+    fig = px.bar(df_plot, x='Countries', y='Yield (%)', text_auto='.2f', title="OECD 10Y Yields")
     fig.update_layout(showlegend=False)
     return fig
 
 def plot_us_yields_line(fred_data):
-    selected_columns = list(SERIES["US_Yields"].keys())
+    selected_columns = [col for col in SERIES["US_Yields"].keys() if col in fred_data.columns]
     data = fred_data[selected_columns]
-    fig = px.line(data,
-                  x=data.index,
-                  y=data.columns,
-                  title="US Yields over time")
-    fig.update_layout(xaxis_title="Date",
-                      yaxis_title="Yield (%)")
+    fig = px.line(data, x=data.index, y=data.columns, title="US Yields over time")
+    fig.update_layout(xaxis_title="Date", yaxis_title="Yield (%)")
     return fig
 
 def plot_oecd_10y_line(fred_data):
-    selected_columns = list(SERIES["Yields_10Y_OECD"].keys())
+    selected_columns = [col for col in SERIES["Yields_10Y_OECD"].keys() if col in fred_data.columns]
     data = fred_data[selected_columns]
-    fig = px.line(data,
-                  x=data.index,
-                  y=data.columns,
-                  title="OECD 10Y Yields over time")
-    fig.update_layout(xaxis_title="Date",
-                      yaxis_title="Yield (%)")
+    fig = px.line(data, x=data.index, y=data.columns, title="OECD 10Y Yields over time")
+    fig.update_layout(xaxis_title="Date", yaxis_title="Yield (%)")
     return fig
 
 def compute_macro_regime(fred_data):
+    if "Real GDP" not in fred_data.columns or "CPI Inflation" not in fred_data.columns:
+        return pd.DataFrame()
     gdp_yoy = fred_data["Real GDP"].pct_change(12)
     cpi_yoy = fred_data["CPI Inflation"].pct_change(12)
-    
-    gdp_trend = np.sign(gdp_yoy.diff())
-    gdp_trend = gdp_trend.replace(0,np.nan).ffill()
-    
-    cpi_trend = np.sign(cpi_yoy.diff())
-    cpi_trend = cpi_trend.replace(0,np.nan).ffill()
-    
-    regimes = pd.DataFrame({"gdp_yoy":gdp_yoy,"cpi_yoy":cpi_yoy,"gdp_trend":gdp_trend,"cpi_trend":cpi_trend})
-    
-    growth_label=regimes["gdp_trend"].map({1.0:"Rising Growth",-1.0:"Falling Growth"})
-    inflation_label=regimes["cpi_trend"].map({1.0:"Rising Inflation",-1.0:"Falling Inflation"})
-    
-    regimes["regime"]=growth_label + "+" + inflation_label
-    
+    gdp_trend = np.sign(gdp_yoy.diff()).replace(0, np.nan).ffill()
+    cpi_trend = np.sign(cpi_yoy.diff()).replace(0, np.nan).ffill()
+    regimes = pd.DataFrame({"gdp_trend": gdp_trend, "cpi_trend": cpi_trend})
+    growth_label = regimes["gdp_trend"].map({1.0: "Rising Growth", -1.0: "Falling Growth"})
+    inflation_label = regimes["cpi_trend"].map({1.0: "Rising Inflation", -1.0: "Falling Inflation"})
+    regimes["regime"] = growth_label + " + " + inflation_label
     return regimes
 
-def compute_regime_based_stats(returns,regimes):
-    df = returns.join(regimes["regime"])
-    avg_return = (df.groupby("regime")[returns.columns].mean()*12)*100
+def compute_regime_based_stats(returns, regimes):
+    df = returns.join(regimes["regime"]).dropna()
+    if df.empty: return pd.DataFrame()
+    avg_return = (df.groupby("regime")[returns.columns].mean() * 12) * 100
     return avg_return
 
-
-
-
-##### CODE #####
+##### CODE PRINCIPAL #####
 
 st.title("Market Dashboard")
-col1, col2 = st.columns([1,3])
+col1, col2 = st.columns([1, 3])
 
 with col1:
     with st.container(border=True):
         st.markdown("#### Parameters")
-        period_choice = st.pills("Period", 
-                                 period_dict.keys(),
-                                 default="1 Year")
+        period_choice = st.pills("Period", period_dict.keys(), default="1 Year")
         period = period_dict[period_choice]
-        window_selection = st.pills(
-                "Window (for Volatility Tab)",
-                options=vol_window_dict.keys(),
-                default="21 Days (1m)")
+        
+        window_selection = st.pills("Window (Volatility)", options=vol_window_dict.keys(), default="21 Days (1m)")
         window = vol_window_dict[window_selection]
-        equity_choice = st.multiselect("Equity", 
-                                       ASSETS["Equity"].keys(), 
-                                       default="Apple (AAPL)")
-        commodity_choice = st.multiselect("Commodity", 
-                                          ASSETS["Commodity"].keys(),
-                                          default=["Crude Oil WTI (CL=F)",
-                                                   "Gold (GC=F)"])
-        index_choice = st.multiselect("Index",
-                                      ASSETS["Index"].keys(),
-                                      default="S&P 500 (^GSPC)")
-        forex_choice = st.multiselect("Forex", 
-                                      ASSETS["Forex"].keys())
-        fixed_income_choice = st.multiselect("Fixed income",
-                                             ASSETS["Fixed Income"].keys())
-        tickers = get_ticker(equity_choice, 
-                             commodity_choice, 
-                             index_choice, 
-                             forex_choice, 
-                             fixed_income_choice)
-        logscale = st.toggle("Log-scale",value=False)
+        
+        equity_choice = st.multiselect("Equity", ASSETS["Equity"].keys(), default="Apple (AAPL)")
+        commodity_choice = st.multiselect("Commodity", ASSETS["Commodity"].keys(), default=["Crude Oil WTI (CL=F)", "Gold (GC=F)"])
+        index_choice = st.multiselect("Index", ASSETS["Index"].keys(), default="S&P 500 (^GSPC)")
+        forex_choice = st.multiselect("Forex", ASSETS["Forex"].keys())
+        fixed_income_choice = st.multiselect("Fixed income", ASSETS["Fixed Income"].keys())
+        
+        tickers = get_ticker(equity_choice, commodity_choice, index_choice, forex_choice, fixed_income_choice)
+        logscale = st.toggle("Log-scale", value=False)
+        
         if len(tickers) == 0:
-                    st.toast("Please select at least one ticker to continue.", icon="⚠️")
-                    st.stop()
-
-
-
+            st.warning("Please select at least one ticker.")
+            st.stop()
 
 with col2:
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Market Overview",
-                                            "Correlation matrix",
-                                            "Volatility",
-                                            "Regime",
-                                            "Data"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Market Overview", "Correlation", "Volatility", "Regime", "Data"])
     
     with st.spinner("Processing data..."):
         yfinance_data = fetch_yfinance_data(tickers, period)
@@ -351,56 +299,34 @@ with col2:
         yfinance_fig = plot_yfinance_data(yfinance_data, tickers, logscale)
     
     with tab1:
-        st.plotly_chart(yfinance_fig)
-        
+        st.plotly_chart(yfinance_fig, use_container_width=True)
     with tab2:
-        correlation_fig = yfinance_data_correlation(yfinance_data)
-        st.plotly_chart(correlation_fig, use_container_width=True)
-    
+        st.plotly_chart(yfinance_data_correlation(yfinance_data), use_container_width=True)
     with tab3:
-        vol_fig = plot_volatility(yfinance_data, window,logscale)
-        st.plotly_chart(vol_fig, use_container_width=True)
-        if window>len(yfinance_data):
-            st.warning("**Window is too large:** The selected rolling window can't be larger than the period. Please select a smaller window.", icon="⚠️")
-
-        
+        if window > len(yfinance_data):
+            st.error("Window too large for the selected period.")
+        else:
+            st.plotly_chart(plot_volatility(yfinance_data, window, logscale), use_container_width=True)
     with tab4:
         regimes = compute_macro_regime(fred_data)
         returns = yfinance_data.pct_change().dropna()
-        avg_return=compute_regime_based_stats(returns,regimes)
-        st.write("Average return (%)")
-        st.table(avg_return)
-        if avg_return.empty:
-            st.warning("**Period too short:** The selected time range is not sufficient to compute macro regimes. Please select a longer period (at least 1 year) to see regime-based statistics.", icon="⚠️")
-
+        avg_return = compute_regime_based_stats(returns, regimes)
+        if not avg_return.empty:
+            st.write("Average annualized return by regime (%)")
+            st.table(avg_return)
+        else:
+            st.info("Not enough data for macro regimes.")
     with tab5:
         st.dataframe(yfinance_data)
     
-    st.write("---")
+    st.divider()
     metrics_yfinance_data(yfinance_data)
-    
 
-st.write("---")
 st.subheader("Macro Overview")
-
-
-us_maturities_fig = plot_us_maturities_bar(fred_data)
-OECD_10Y_fig = plot_oecd_10y_bar(fred_data)
-us_historic_fig = plot_us_yields_line(fred_data)
-OECD_historic_fig = plot_oecd_10y_line(fred_data)
-
-col1, col2 = st.columns(2)
-with col1:
-    st.plotly_chart(us_maturities_fig)
-    st.plotly_chart(us_historic_fig)
-
-with col2:
-    st.plotly_chart(OECD_10Y_fig)
-    st.plotly_chart(OECD_historic_fig)
-    
-    
-    
-    
-    
-    
-    
+m_col1, m_col2 = st.columns(2)
+with m_col1:
+    st.plotly_chart(plot_us_maturities_bar(fred_data), use_container_width=True)
+    st.plotly_chart(plot_us_yields_line(fred_data), use_container_width=True)
+with m_col2:
+    st.plotly_chart(plot_oecd_10y_bar(fred_data), use_container_width=True)
+    st.plotly_chart(plot_oecd_10y_line(fred_data), use_container_width=True)
