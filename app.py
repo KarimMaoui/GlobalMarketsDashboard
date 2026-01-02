@@ -4,6 +4,10 @@ import plotly.express as px
 import numpy as np
 import pandas_datareader.data as web
 import pandas as pd
+import warnings
+
+
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 st.set_page_config(layout="wide", page_title="Market dashboard")
 
@@ -125,7 +129,7 @@ SERIES = {
 ##### FUNCTIONS #####
 
 def fetch_yfinance_data(tickers, period):
-    data = yf.download(tickers, period=period)["Close"]
+    data = yf.download(tickers, period=period, auto_adjust=True)["Close"]
     yfinance_data = data.ffill().dropna()
     rename_map = {}
     for category, assets in ASSETS.items():
